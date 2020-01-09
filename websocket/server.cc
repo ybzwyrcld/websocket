@@ -58,8 +58,18 @@ int EpollUnregister(const int &epoll_fd, const int &fd) {
 
 }  // namespace
 
-Server::Server() {}
-Server::~Server() {}
+Server::~Server() {
+  if (!valid_fds_.empty()) {
+    for (auto fd : valid_fds_) close(fd);
+    valid_fds_.clear();
+  }
+  if (listen_fd_ > 0) {
+    close(listen_fd_);
+  }
+  if (epoll_fd_ > 0) {
+    close(epoll_fd_);
+  }
+}
 
 void Server::Init(const std::string &ip, const int &port,
                   const int &max_count) {
@@ -94,10 +104,19 @@ bool Server::Run(const int &time_out) {
   }
   epoll_fd_ = epoll_create(max_count_);
   EpollRegister(epoll_fd_, listen_fd_);
+  is_running_ = true;
+  is_stop_ = false;
   std::thread thread = std::thread(&Server::ThreadHandler, this, time_out);
   thread.detach();
   printf("Service is running!\n");
   return true;
+}
+
+void Server::Stop(void) {
+  is_running_ = false;
+  while (!is_stop_) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
 }
 
 int Server::SendToAll(char *send_buf, const int &size) {
@@ -151,7 +170,6 @@ int Server::RecvData(const int &sock, char *recv_buf) {
 void Server::ThreadHandler(const int &time_out) {
   int ret;
   int alive_count;
-  // struct epoll_event *epoll_events = new struct epoll_event[max_count_];
   std::unique_ptr<struct epoll_event[]> epoll_events(
       new struct epoll_event[max_count_],
       std::default_delete<struct epoll_event[]>());
@@ -161,7 +179,7 @@ void Server::ThreadHandler(const int &time_out) {
                                    std::default_delete<char[]>());
   WebSocket websocket;
   std::string request, respond;
-  while (1) {
+  while (is_running_) {
     ret = epoll_wait(epoll_fd_, epoll_events.get(), max_count_, time_out);
     if (ret == 0) {
       printf("Time out\n");
@@ -197,13 +215,25 @@ void Server::ThreadHandler(const int &time_out) {
                 valid_fds_.erase(it);
               }
               close(fd);
-              // DealDisconnect(epoll_events_[i].data.fd);
             }
           }
         }
       }
     }
   }
+  if (!valid_fds_.empty()) {
+    for (auto fd : valid_fds_) close(fd);
+    valid_fds_.clear();
+  }
+  if (listen_fd_ > 0) {
+    close(listen_fd_);
+    listen_fd_ = -1;
+  }
+  if (epoll_fd_ > 0) {
+    close(epoll_fd_);
+    epoll_fd_ = -1;
+  }
+  is_stop_ = true;
 }
 
 }  // namespace libwebsocket

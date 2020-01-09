@@ -17,13 +17,14 @@ namespace libwebsocket {
 
 using ClientReceiveCallback =
     std::function<void(const int &fd, const char *buffer, const int &size)>;
+
 class Client {
  public:
   Client() {}
-  ~Client() {}
+  ~Client();
   void Init(const std::string &ip, const int &port);
   bool Run(const int &time_out = 3000);
-  void Disconnect(void);
+  void Stop(void);
   void OnReceived(const ClientReceiveCallback &callback) {
     callback_ = callback;
   }
@@ -31,13 +32,16 @@ class Client {
   int SendData(const std::string &msg) {
     return SendData(msg.c_str(), msg.size());
   }
+  bool is_running(void) const { return is_running_; }
 
  private:
   int RecvData(const int &sock, char *recv_buf);
   void ThreadHandler(const int &time_out);
 
-  int epoll_fd_;
-  int socket_fd_;
+  bool is_running_ = false;
+  bool is_stop_ = false;
+  int epoll_fd_ = -1;
+  int socket_fd_ = -1;
   int server_port_;
   std::string server_ip_;
   ClientReceiveCallback callback_;

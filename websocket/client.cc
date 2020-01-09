@@ -84,6 +84,15 @@ std::string GetRandomString(const int &length) {
 
 }  // namespace
 
+Client::~Client() {
+  if (socket_fd_ > 0) {
+    close(socket_fd_);
+  }
+  if (epoll_fd_ > 0) {
+    close(epoll_fd_);
+  }
+}
+
 void Client::Init(const std::string &ip, const int &port) {
   server_ip_ = ip;
   server_port_ = port;
@@ -123,7 +132,7 @@ bool Client::Run(const int &time_out) {
     message_digest[i] = htonl(message_digest[i]);
   }
   authen_key = base64_encode(
-    reinterpret_cast<const uint8_t *>(message_digest), 20);
+      reinterpret_cast<const uint8_t *>(message_digest), 20);
   // Generate request data.
   std::string request =
       "GET / HTTP/1.1\r\n"
@@ -138,20 +147,18 @@ bool Client::Run(const int &time_out) {
   if (send(socket_fd, request.c_str(), request.size(), 0) != request.size()) {
     printf("Send failed!!!\n");
     close(socket_fd);
-    socket_fd_ = -1;
     return false;
   }
   // Waitting for respond.
   int timeout = 3;
   std::unique_ptr<char[]> buffer(new char[kMaxBufferLength],
                                  std::default_delete<char[]>());
-  // memset(buffer.get(), 0x0, kMaxBufferLength);
   while (timeout--) {
     ret = recv(socket_fd, buffer.get(), kMaxBufferLength, 0);
     if (ret > 0) {
       std::string respond = buffer.get();
-      // printf("%s\n", respond.c_str());
-      if (respond.find(authen_key) == std::string::npos) {
+      if ((respond.find("HTTP/1.1 101") == std::string::npos) ||
+          (respond.find(authen_key) == std::string::npos)) {
         printf("Authentication failed!!!\n");
         close(socket_fd);
         return false;
@@ -165,10 +172,7 @@ bool Client::Run(const int &time_out) {
     }
     sleep(1);
   }
-
-  if (timeout <= 0) {
-    return false;
-  }
+  if (timeout <= 0) return false;
   // TCP socket keepalive.
   int keepalive = 1;     // Enable keepalive attributes.
   int keepidle = 30;     // Time out for starting detection.
@@ -184,16 +188,18 @@ bool Client::Run(const int &time_out) {
   // Listen.
   epoll_fd_ = epoll_create(1);
   EpollRegister(epoll_fd_, socket_fd_);
+  is_running_ = true;
+  is_stop_ = false;
   std::thread thread = std::thread(&Client::ThreadHandler, this, time_out);
   thread.detach();
   printf("Service is running!\n");
   return true;
 }
 
-void Client::Disconnect(void) {
-  if (socket_fd_ > 0) {
-    close(socket_fd_);
-    socket_fd_ = -1;
+void Client::Stop(void) {
+  is_running_ = false;
+  while (!is_stop_) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
   }
 }
 
@@ -238,7 +244,7 @@ void Client::ThreadHandler(const int &time_out) {
                                    std::default_delete<char[]>());
   WebSocket websocket;
   std::vector<char> recv_data, payload_content;
-  while (1) {
+  while (is_running_) {
     ret = epoll_wait(epoll_fd_, epoll_event.get(), 1, time_out);
     if (ret == 0) {
       printf("Time out\n");
@@ -263,6 +269,15 @@ void Client::ThreadHandler(const int &time_out) {
       }
     }
   }
+  if (socket_fd_ > 0) {
+    close(socket_fd_);
+    socket_fd_ = -1;
+  }
+  if (epoll_fd_ > 0) {
+    close(epoll_fd_);
+    epoll_fd_ = -1;
+  }
+  is_stop_ = true;
 }
 
 }  // namespace libwebsocket
