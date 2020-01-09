@@ -9,4 +9,6 @@ add_sources(
   sha1.h
   server.cc
   server.h
+  client.cc
+  client.h
 )

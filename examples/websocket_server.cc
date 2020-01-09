@@ -30,9 +30,10 @@ int main(void) {
     payload_content.clear();
     send_data.clear();
     recv_data.assign(buffer, buffer + size);
-    websocket.ClientFormDataParse(recv_data, &payload_content);
+    websocket.FormDataParse(recv_data, &payload_content);
     // TODO(mengyuming@hotmail.com): Just return the received data at now.
-    websocket.ServerFormDataGenerate(payload_content, &send_data);
+    websocket.set_mask(0);
+    websocket.FormDataGenerate(payload_content, &send_data);
     send(fd, send_data.data(), send_data.size(), 0);
   });
   server.Run(3000);  // 3000 ms epoll timeout.

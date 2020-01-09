@@ -22,10 +22,8 @@ class WebSocket {
   WebSocket() {}
   ~WebSocket() {}
   int HandShake(const std::string &reuest, std::string *respond);
-  int ServerFormDataGenerate(const std::vector<char> &msg,
-                             std::vector<char> *out);
-  int ClientFormDataParse(const std::vector<char> &msg,
-                          std::vector<char> *out);
+  int FormDataGenerate(const std::vector<char> &msg, std::vector<char> *out);
+  int FormDataParse(const std::vector<char> &msg, std::vector<char> *out);
   void set_fin(const uint8_t &fin) { fin_ = fin; }
   void set_reserve(const uint8_t &reserve) { reserve_ = reserve; }
   void set_opcode(const uint8_t &opcode) { opcode_ = opcode; }

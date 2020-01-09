@@ -28,5 +28,6 @@ Output programs in `examples` directory:
 
 ```bash
 examples/websocket_server
+examples/websocket_client
 ```
 

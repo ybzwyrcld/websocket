@@ -178,7 +178,7 @@ void Server::ThreadHandler(const int &time_out) {
         } else {
           int fd = epoll_events[i].data.fd;
           if (epoll_events[i].events & EPOLLIN) {
-            int ret = RecvData(fd, recv_buf.get());
+            ret = RecvData(fd, recv_buf.get());
             if (ret > 0) {
               // First handshake.
               if (std::count(valid_fds_.begin(), valid_fds_.end(), fd) == 0) {
@@ -192,8 +192,10 @@ void Server::ThreadHandler(const int &time_out) {
             } else if (ret == 0) {
               printf("Disconnect\n");
               EpollUnregister(epoll_fd_, fd);
-              valid_fds_.erase(
-                  std::find(valid_fds_.begin(), valid_fds_.end(), fd));
+              auto it = std::find(valid_fds_.begin(), valid_fds_.end(), fd);
+              if (it != valid_fds_.end()) {
+                valid_fds_.erase(it);
+              }
               close(fd);
               // DealDisconnect(epoll_events_[i].data.fd);
             }

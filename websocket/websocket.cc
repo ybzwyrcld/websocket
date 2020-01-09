@@ -96,8 +96,8 @@ int WebSocket::HandShake(const std::string &request, std::string *respond) {
   return 0;
 }
 
-int WebSocket::ServerFormDataGenerate(const std::vector<char> &msg,
-                                      std::vector<char> *out) {
+int WebSocket::FormDataGenerate(const std::vector<char> &msg,
+                                std::vector<char> *out) {
   if (out == nullptr) return -1;
   out->clear();
   ProtocolHead head;
@@ -105,7 +105,7 @@ int WebSocket::ServerFormDataGenerate(const std::vector<char> &msg,
   head.bit.reserve = reserve_;
   head.bit.opcode = opcode_;
   out->push_back(head.value[0]);
-  head.bit.mask = 0;  // Never need a mask.
+  head.bit.mask = mask_;
   // Payload length.
   if (msg.size() < 126) {
     head.bit.payloadlen = msg.size();
@@ -138,8 +138,8 @@ int WebSocket::ServerFormDataGenerate(const std::vector<char> &msg,
   return 0;
 }
 
-int WebSocket::ClientFormDataParse(const std::vector<char> &msg,
-                                   std::vector<char> *out) {
+int WebSocket::FormDataParse(const std::vector<char> &msg,
+                             std::vector<char> *out) {
   if (out == nullptr) return -1;
   out->clear();
   ProtocolHead head;
@@ -173,7 +173,7 @@ int WebSocket::ClientFormDataParse(const std::vector<char> &msg,
       out->push_back(msg[pos + i] ^ msg[pos - 4 + i % 4]);
     }
   } else {
-    out->assign(msg.begin() + pos, msg.end());
+    out->assign(msg.begin() + pos - 4, msg.end());
   }
   return 0;
 }
