@@ -21,21 +21,27 @@ class WebSocket {
  public:
   WebSocket() {}
   ~WebSocket() {}
+  bool IsHandShake(const std::string &request);
   int HandShake(const std::string &reuest, std::string *respond);
   int FormDataGenerate(const std::vector<char> &msg, std::vector<char> *out);
   int FormDataParse(const std::vector<char> &msg, std::vector<char> *out);
+
+  uint8_t fin(void) const { return fin_; }
   void set_fin(const uint8_t &fin) { fin_ = fin; }
+
+  uint8_t reserve(void) const { return reserve_; }
   void set_reserve(const uint8_t &reserve) { reserve_ = reserve; }
+
+  uint8_t opcode(void) const { return opcode_; }
   void set_opcode(const uint8_t &opcode) { opcode_ = opcode; }
+
+  uint8_t mask(void) const { return mask_; }
   void set_mask(const uint8_t &mask) { mask_ = mask; }
+
+  uint64_t payload_length(void) const { return payload_length_; }
   void set_payload_length(const uint64_t &payload_length) {
     payload_length_ = payload_length;
   }
-  uint8_t fin(void) const { return fin_; }
-  uint8_t reserve(void) const { return reserve_; }
-  uint8_t opcode(void) const { return opcode_; }
-  uint8_t mask(void) const { return mask_; }
-  uint64_t payload_length(void) const { return payload_length_; }
 
  private:
   uint8_t fin_ = 0;

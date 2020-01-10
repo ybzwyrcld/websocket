@@ -201,6 +201,10 @@ void Server::ThreadHandler(const int &time_out) {
               // First handshake.
               if (std::count(valid_fds_.begin(), valid_fds_.end(), fd) == 0) {
                 request = recv_buf.get();
+                if (!websocket.IsHandShake(request)) {
+                  close(fd);
+                  continue;
+                }
                 websocket.HandShake(request, &respond);
                 send(fd, respond.c_str(), respond.size(), 0);
                 valid_fds_.push_back(fd);

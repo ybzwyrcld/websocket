@@ -144,7 +144,8 @@ bool Client::Run(const int &time_out) {
       "Sec-WebSocket-Version: 13\r\n"
       "Upgrade: websocket\r\n";
   // printf("%s\n", request.c_str());
-  if (send(socket_fd, request.c_str(), request.size(), 0) != request.size()) {
+  if (send(socket_fd, request.c_str(), request.size(), 0) !=
+      static_cast<int>(request.size())) {
     printf("Send failed!!!\n");
     close(socket_fd);
     return false;
