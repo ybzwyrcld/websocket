@@ -11,6 +11,7 @@
 
 #include <functional>
 #include <string>
+#include <vector>
 
 
 namespace libwebsocket {
@@ -28,9 +29,13 @@ class Client {
   void OnReceived(const ClientReceiveCallback &callback) {
     callback_ = callback;
   }
+  int SendRawData(const char *buffer, const int &size);
+  int SendRawData(const std::vector<char> &msg) {
+    return SendRawData(msg.data(), msg.size());
+  }
   int SendData(const char *buffer, const int &size);
-  int SendData(const std::string &msg) {
-    return SendData(msg.c_str(), msg.size());
+  int SendData(const std::vector<char> &msg) {
+    return SendData(msg.data(), msg.size());
   }
   bool is_running(void) const { return is_running_; }
 

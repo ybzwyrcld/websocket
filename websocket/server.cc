@@ -178,7 +178,10 @@ void Server::ThreadHandler(const int &time_out) {
   std::unique_ptr<char[]> recv_buf(new char[kMaxBufferLength],
                                    std::default_delete<char[]>());
   WebSocket websocket;
-  std::string request, respond;
+  std::string request;
+  std::string respond;
+  std::vector<char> recv_data;
+  std::vector<char> payload_content;
   while (is_running_) {
     ret = epoll_wait(epoll_fd_, epoll_events.get(), max_count_, time_out);
     if (ret == 0) {
@@ -209,7 +212,13 @@ void Server::ThreadHandler(const int &time_out) {
                 send(fd, respond.c_str(), respond.size(), 0);
                 valid_fds_.push_back(fd);
               } else {
-                callback_(fd, recv_buf.get(), ret);
+                deep_callback_(fd, recv_buf.get(), ret);
+                recv_data.clear();
+                payload_content.clear();
+                recv_data.assign(recv_buf.get(), recv_buf.get() + ret);
+                if (websocket.FormDataParse(recv_data, &payload_content) > 0) {
+                  callback_(fd, payload_content.data(), payload_content.size());
+                }
               }
             } else if (ret == 0) {
               printf("Disconnect\n");

@@ -8,15 +8,14 @@
 
 #include "websocket.h"
 
-#include <assert.h>
 #include <arpa/inet.h>
+#include <assert.h>
 
 #include <map>
 #include <vector>
 
 #include "base64.h"
 #include "sha1.h"
-
 
 namespace libwebsocket {
 
@@ -59,12 +58,12 @@ int StringSplit(const std::string &str, const std::string &div,
 
 }  // namespace
 
-bool WebSocket::IsHandShake(const std::string &request) { 
-  return ((request.find("GET / HTTP/1.1")!= std::string::npos) &&
+bool WebSocket::IsHandShake(const std::string &request) {
+  return ((request.find("GET / HTTP/1.1") != std::string::npos) &&
           (request.find("Connection: Upgrade") != std::string::npos ||
-              request.find("Connection:Upgrade") != std::string::npos) &&
+           request.find("Connection:Upgrade") != std::string::npos) &&
           (request.find("Upgrade: websocket") != std::string::npos ||
-              request.find("Upgrade:websocket") != std::string::npos) &&
+           request.find("Upgrade:websocket") != std::string::npos) &&
           (request.find("Sec-WebSocket-Key:") != std::string::npos));
 }
 
@@ -179,10 +178,16 @@ int WebSocket::FormDataParse(const std::vector<char> &msg,
   // Payload content.
   if (mask_ == 1) {
     for (uint64_t i = 0; i < payload_length_; ++i) {
-      out->push_back(msg[pos + i] ^ msg[pos - 4 + i % 4]);
+      payload_content_.push_back(msg[pos + i] ^ msg[pos - 4 + i % 4]);
     }
   } else {
-    out->assign(msg.begin() + pos - 4, msg.end());
+    payload_content_.insert(payload_content_.end(), msg.begin() + pos - 4,
+                            msg.end());
+  }
+  if (fin_ == 1) {
+    out->assign(payload_content_.begin(), payload_content_.end());
+    payload_content_.clear();
+    return out->size();
   }
   return 0;
 }

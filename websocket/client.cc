@@ -204,16 +204,19 @@ void Client::Stop(void) {
   }
 }
 
+int Client::SendRawData(const char *buffer, const int &size) {
+  return send(socket_fd_, buffer, size, 0);
+}
+
 int Client::SendData(const char *buffer, const int &size) {
   WebSocket websocket;
   websocket.set_fin(1);
   websocket.set_mask(1);
   websocket.set_opcode(0x1);
-  websocket.set_payload_length(size);
   std::vector<char> msgin, msgout;
   msgin.assign(buffer, buffer + size);
   websocket.FormDataGenerate(msgin, &msgout);
-  return send(socket_fd_, msgout.data(), msgout.size(), 0);
+  return SendRawData(msgout);
 }
 
 int Client::RecvData(const int &sock, char *recv_buf) {
@@ -259,8 +262,10 @@ void Client::ThreadHandler(const int &time_out) {
           recv_data.clear();
           payload_content.clear();
           recv_data.assign(recv_buf.get(), recv_buf.get() + ret);
-          websocket.FormDataParse(recv_data, &payload_content);
-          callback_(socket_fd_, payload_content.data(), payload_content.size());
+          if (websocket.FormDataParse(recv_data, &payload_content) > 0) {
+            callback_(socket_fd_, payload_content.data(),
+                      payload_content.size());
+          }
         } else if (ret == 0) {
           printf("Disconnect\n");
           EpollUnregister(epoll_fd_, socket_fd_);

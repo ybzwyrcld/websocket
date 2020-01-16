@@ -21,13 +21,17 @@ using ServerReceiveCallback =
 
 class Server {
  public:
-  Server() {}
+  Server() : callback_([](const int &fd, const char *, const int &) {}),
+        deep_callback_([](const int &fd, const char *, const int &) {}) {}
   ~Server();
   void Init(const std::string &ip, const int &port, const int &max_count);
   bool Run(const int &time_out = 3000);
   void Stop(void);
   void OnReceived(const ServerReceiveCallback &callback) {
     callback_ = callback;
+  }
+  void OnDeepReceived(const ServerReceiveCallback &callback) {
+    deep_callback_ = callback;
   }
   int SendToAll(char *send_buf, const int &size);
   bool is_running(void) const { return is_running_; }
@@ -45,6 +49,7 @@ class Server {
   int max_count_;
   std::string server_ip_;
   std::vector<int> valid_fds_;
+  ServerReceiveCallback deep_callback_;
   ServerReceiveCallback callback_;
 };
 

@@ -14,8 +14,16 @@
 #include <string>
 #include <vector>
 
-
 namespace libwebsocket {
+
+enum OPCodeType {
+  kOPPacket = 0x0,
+  kOPText,
+  kOPBinary,
+  kOPClose = 0x8,
+  kOPPing,
+  kOPPong,
+};
 
 class WebSocket {
  public:
@@ -49,6 +57,7 @@ class WebSocket {
   uint8_t opcode_ = 0;
   uint8_t mask_ = 0;
   uint64_t payload_length_ = 0;
+  std::vector<char> payload_content_;
 };
 
 }  // namespace libwebsocket
