@@ -4,7 +4,7 @@ project ("websocket")
 
 option(WEBSOCKET_BUILD_EXAMPLES "Build websocket examples" OFF)
 
-set(CMAKE_CXX_FLAGS_DEBUG "$ENV{CXXFLAGS} -O0 -Wall -g -ggdb")
+set(CMAKE_CXX_FLAGS_DEBUG "$ENV{CXXFLAGS} -O2 -Wall -g -ggdb")
 set(CMAKE_CXX_FLAGS_RELEASE "$ENV{CXXFLAGS} -O3 -Wall")
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -pthread")
@@ -36,6 +36,13 @@ aux_source_directory(websocket src_MAIN)
 add_library(${PROJECT_NAME}
   ${src_MAIN}
 )
+
+if(WIN32)
+target_link_libraries(${PROJECT_NAME}
+  ws2_32
+)
+endif(WIN32)
+
 set_target_properties(${PROJECT_NAME} PROPERTIES INTERFACE_INCLUDE_DIRECTORIES ${websocket_include_dirs})
 
 if (WEBSOCKET_BUILD_EXAMPLES)

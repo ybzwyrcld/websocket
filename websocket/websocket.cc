@@ -8,7 +8,13 @@
 
 #include "websocket.h"
 
+#if defined(__linux__)
 #include <arpa/inet.h>
+#elif defined(_WIN32)
+#include <winsock2.h>
+#include <windows.h>
+#endif
+
 #include <assert.h>
 
 #include <map>
@@ -96,8 +102,9 @@ int WebSocket::HandShake(const std::string &request, std::string *respond) {
   for (int i = 0; i < 5; i++) {
     message_digest[i] = htonl(message_digest[i]);
   }
-  real_key =
-      base64_encode(reinterpret_cast<const uint8_t *>(message_digest), 20);
+  std::vector<char> keytemp(reinterpret_cast<char*>(message_digest),
+                            reinterpret_cast<char*>(message_digest)+20);
+  Base64Encode(keytemp, &real_key);
   real_key += "\r\n";
   *respond += real_key.c_str();
   *respond += "Upgrade: websocket\r\n\r\n";

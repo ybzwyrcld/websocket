@@ -6,8 +6,6 @@
 // Date:  2020-01-07 10:22
 // Description:  No.
 
-#include <sys/types.h>
-#include <sys/socket.h>
 
 #include <chrono>  // NOLINT.
 #include <thread>  // NOLINT.
@@ -16,20 +14,22 @@
 #include "websocket/websocket.h"
 
 
-using libwebsocket::Server;
+using libwebsocket::WebSocketServer;
 using libwebsocket::WebSocket;
 
 int main(void) {
-  Server server;
+  WebSocketServer server;
   WebSocket websocket;;
   websocket.set_fin(1);
   websocket.set_opcode(1);
   websocket.set_mask(0);
   std::vector<char> payload_content;
   std::vector<char> send_data;
-  server.Init("", 8081, 10);  // Set ip="": listen any address.
+  server.Init();
+  server.SetServerAccessPoint("127.0.0.1", 8081);
   // Set the callback function when receiving data.
-  server.OnReceived([&](const int &fd, const char *buffer, const int &size) {
+  server.OnReceived([&] (const WebSocketServer::Socket& fd,
+      char const* buffer, int const& size) -> void {
     payload_content.clear();
     send_data.clear();
     payload_content.assign(buffer, buffer + size);
@@ -37,9 +37,13 @@ int main(void) {
     websocket.FormDataGenerate(payload_content, &send_data);
     send(fd, send_data.data(), send_data.size(), 0);
   });
-  server.Run(3000);  // 3000 ms epoll timeout.
-  while (1) {
-    std::this_thread::sleep_for(std::chrono::seconds(5));
+  if ((server.InitServer() == 0) &&
+      server.Run()) {
+    std::this_thread::sleep_for(std::chrono::seconds(1));
+    while (server.service_is_running()) {
+      std::this_thread::sleep_for(std::chrono::seconds(5));
+    }
+    server.Stop();
   }
   return 0;
 }

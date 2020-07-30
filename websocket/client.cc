@@ -8,16 +8,17 @@
 
 #include "client.h"
 
-#include <arpa/inet.h>
-#include <fcntl.h>
-#include <netinet/in.h>
-#include <netinet/tcp.h>
+#include <stdlib.h>
 #include <string.h>
-#include <sys/epoll.h>
-#include <sys/socket.h>
-#include <sys/types.h>
-#include <time.h>
-#include <unistd.h>
+#if defined(__linux__)
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <fcntl.h>
+#endif
+
+#include <chrono>
+
+#include "socket_util.h"
 
 #include <memory>
 #include <thread>  // NOLINT.
@@ -32,47 +33,23 @@ namespace libwebsocket {
 
 namespace {
 
-constexpr int kMaxBufferLength = 65536;
+constexpr int kMaxBufferLength = 4096;
 
-int EpollRegister(const int &epoll_fd, const int &fd) {
-  struct epoll_event ev;
-  int ret, flags;
-  // Important: make the fd non-blocking.
-  flags = fcntl(fd, F_GETFL);
-  fcntl(fd, F_SETFL, flags | O_NONBLOCK);
-  ev.events = EPOLLIN;
-  // ev.events = EPOLLIN | EPOLLET;
-  ev.data.fd = fd;
-  do {
-    ret = epoll_ctl(epoll_fd, EPOLL_CTL_ADD, fd, &ev);
-  } while (ret < 0 && errno == EINTR);
-  return ret;
-}
-
-int EpollUnregister(const int &epoll_fd, const int &fd) {
-  int ret;
-  do {
-    ret = epoll_ctl(epoll_fd, EPOLL_CTL_DEL, fd, NULL);
-  } while (ret < 0 && errno == EINTR);
-
-  return ret;
-}
-
-std::string GetRandomString(const int &length) {
-  int flag, i;
+// 生成一条随机字符串.
+std::string GetRandomString(int const& length) {
   std::string result;
-  auto speed = static_cast<uint32_t>(time(NULL));
-  for (i = 0; i < length - 1; i++) {
-    flag = rand_r(&speed) % 3;
+  for (int i = 0; i < length; i++) {
+    srand(time(NULL));
+    int flag = rand() % 3;
     switch (flag) {
       case 0:
-        result.push_back(static_cast<char>('A' + rand_r(&speed) % 26));
+        result.push_back(static_cast<char>('A' + rand() % 26));
         break;
       case 1:
-        result.push_back(static_cast<char>('a' + rand_r(&speed) % 26));
+        result.push_back(static_cast<char>('a' + rand() % 26));
         break;
       case 2:
-        result.push_back(static_cast<char>('0' + rand_r(&speed) % 10));
+        result.push_back(static_cast<char>('0' + rand() % 10));
         break;
       default:
         result.push_back('x');
@@ -84,43 +61,75 @@ std::string GetRandomString(const int &length) {
 
 }  // namespace
 
-Client::~Client() {
-  if (socket_fd_ > 0) {
-    close(socket_fd_);
-  }
-  if (epoll_fd_ > 0) {
-    close(epoll_fd_);
-  }
+// 设置默认回调函数.
+void WebSocketClient::Init(void) {
+  callback_ = [] (Socket const&, char const*, int const&) { return; };
+  deep_callback_ = [] (Socket const&, char const*, int const&) { return; };
+  is_connected_.store(false);
+  service_is_running_.store(false);
 }
 
-void Client::Init(const std::string &ip, const int &port) {
-  server_ip_ = ip;
-  server_port_ = port;
+// 与远程服务器建立TCP连接, 并设置socket为非阻塞模式.
+int WebSocketClient::ConnectRemote(void) {
+  struct sockaddr_in addr;
+  memset(&addr, 0, sizeof(addr));
+  addr.sin_family = AF_INET;
+  addr.sin_port = htons(static_cast<uint16_t>(server_port_));
+#if defined(__linux__)
+  addr.sin_addr.s_addr = inet_addr(server_ip_.c_str());
+  socket_= socket(AF_INET, SOCK_STREAM, 0);
+  if (socket_ == -1) {
+    printf("%s[%d]: Create socket failed!!!\n", __FUNCTION__, __LINE__);
+    return -1;
+  }
+  struct timeval timeout = {0, 500000};
+  setsockopt(socket_, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
+  setsockopt(socket_, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+#elif defined(_WIN32)
+  WSADATA ws_data;
+  if (WSAStartup(MAKEWORD(2,2), &ws_data) != 0) {
+    return -1;
+  }
+  socket_ = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+  if (socket_ == INVALID_SOCKET) {
+    printf("%s[%d]: Create socket failed!!!\n", __FUNCTION__, __LINE__);
+    WSACleanup();
+    return -1;
+  }
+  addr.sin_addr.S_un.S_addr = inet_addr(server_ip_.c_str());
+#endif
+  if (Connect(socket_, reinterpret_cast<struct sockaddr *>(&addr),
+              sizeof(addr)) == -1) {
+    printf("%s[%d]: Connect to remote server failed!!!\n",
+           __FUNCTION__, __LINE__);
+    Close(socket_);
+#if defined(_WIN32)
+    WSACleanup();
+#endif
+    return -1;
+  }
+  // 设置非阻塞模式.
+#if defined(__linux__)
+  int flags = fcntl(socket_, F_GETFL, 0);
+  fcntl(socket_, F_SETFL, flags | O_NONBLOCK);
+#elif defined(_WIN32)
+  unsigned long ul = 1;
+  if (ioctlsocket(socket_, FIONBIO, (unsigned long *)&ul) == SOCKET_ERROR) {
+    printf("%s[%d]: Set socket nonblock failed!!!\n", __FUNCTION__, __LINE__);
+    return -1;
+  }
+#endif
+  is_connected_.store(true);
+  return 0;
 }
 
-bool Client::Run(const int &time_out) {
+// 开启与客户端进行握手, 握手成功后转到服务线程处理数据.
+bool WebSocketClient::Run(void) {
+  if (!is_connected_) return false;
   int ret;
-  int socket_fd = socket(AF_INET, SOCK_STREAM, 0);
-  if (socket_fd == -1) {
-    printf("Create socket fail\n");
-    return false;
-  }
-  struct sockaddr_in server_addr;
-  memset(&server_addr, 0, sizeof(struct sockaddr_in));
-  server_addr.sin_family = AF_INET;
-  server_addr.sin_port = htons(server_port_);
-  server_addr.sin_addr.s_addr = inet_addr(server_ip_.c_str());
-  if (connect(socket_fd, reinterpret_cast<struct sockaddr *>(&server_addr),
-              sizeof(struct sockaddr_in)) < 0) {
-    printf("Connect to server failed!!!\n");
-    return false;
-  }
-  // Set socket non-blocking.
-  int flags = fcntl(socket_fd, F_GETFL);
-  fcntl(socket_fd, F_SETFL, flags | O_NONBLOCK);
   std::string key = GetRandomString(20);
-  key = base64_encode(
-      reinterpret_cast<const uint8_t *>(key.c_str()), key.size());
+  std::vector<char> keytemp(key.begin(), key.end());
+  Base64Encode(keytemp, &key);
   // Get authentication key.
   std::string authen_key = key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
   SHA1 sha;
@@ -128,11 +137,10 @@ bool Client::Run(const int &time_out) {
   sha.Reset();
   sha << authen_key.c_str();
   sha.Result(message_digest);
-  for (int i = 0; i < 5; i++) {
-    message_digest[i] = htonl(message_digest[i]);
-  }
-  authen_key = base64_encode(
-      reinterpret_cast<const uint8_t *>(message_digest), 20);
+  for (int i = 0; i < 5; i++) message_digest[i] = htonl(message_digest[i]);
+  keytemp.assign(reinterpret_cast<char*>(message_digest),
+                 reinterpret_cast<char*>(message_digest)+20);
+  Base64Encode(keytemp, &authen_key);
   // Generate request data.
   std::string request =
       "GET / HTTP/1.1\r\n"
@@ -143,72 +151,62 @@ bool Client::Run(const int &time_out) {
       "Sec-WebSocket-Key: " + key + "\r\n"
       "Sec-WebSocket-Version: 13\r\n"
       "Upgrade: websocket\r\n";
-  // printf("%s\n", request.c_str());
-  if (send(socket_fd, request.c_str(), request.size(), 0) !=
-      static_cast<int>(request.size())) {
-    printf("Send failed!!!\n");
-    close(socket_fd);
+  if (Send(socket_, request.c_str(), request.size(), 0) <= 0) {
+    printf("%s[%d]: Send request data failed !!!\n", __FUNCTION__, __LINE__);
+    Close(socket_);
     return false;
   }
   // Waitting for respond.
   int timeout = 3;
   std::unique_ptr<char[]> buffer(new char[kMaxBufferLength],
                                  std::default_delete<char[]>());
+
   while (timeout--) {
-    ret = recv(socket_fd, buffer.get(), kMaxBufferLength, 0);
+    ret = Recv(socket_, buffer.get(), kMaxBufferLength, 0);
     if (ret > 0) {
       std::string respond = buffer.get();
       if ((respond.find("HTTP/1.1 101") == std::string::npos) ||
           (respond.find(authen_key) == std::string::npos)) {
-        printf("Authentication failed!!!\n");
-        close(socket_fd);
+        printf("%s[%d]: Authentication failed !!!\n", __FUNCTION__, __LINE__);
+        Close(socket_);
         return false;
       }
-      timeout = 3;
       break;
     } else if (ret == 0) {
-      printf("Remote socket close!!!\n");
-      close(socket_fd);
+      printf("%s[%d]: Remote socket close !!!\n", __FUNCTION__, __LINE__);
+      Close(socket_);
       return false;
     }
-    sleep(1);
+    std::this_thread::sleep_for(std::chrono::seconds(1));
   }
-  if (timeout <= 0) return false;
-  // TCP socket keepalive.
-  int keepalive = 1;     // Enable keepalive attributes.
-  int keepidle = 30;     // Time out for starting detection.
-  int keepinterval = 5;  // Time interval for sending packets during detection.
-  int keepcount = 3;     // Max times for sending packets during detection.
-  setsockopt(socket_fd, SOL_SOCKET, SO_KEEPALIVE, &keepalive,
-             sizeof(keepalive));
-  setsockopt(socket_fd, SOL_TCP, TCP_KEEPIDLE, &keepidle, sizeof(keepidle));
-  setsockopt(socket_fd, SOL_TCP, TCP_KEEPINTVL, &keepinterval,
-             sizeof(keepinterval));
-  setsockopt(socket_fd, SOL_TCP, TCP_KEEPCNT, &keepcount, sizeof(keepcount));
-  socket_fd_ = socket_fd;
-  // Listen.
-  epoll_fd_ = epoll_create(1);
-  EpollRegister(epoll_fd_, socket_fd_);
-  is_running_ = true;
-  is_stop_ = false;
-  std::thread thread = std::thread(&Client::ThreadHandler, this, time_out);
-  thread.detach();
-  printf("Service is running!\n");
+  if (timeout < 0) {
+    Close(socket_);
+    return false;
+  }
+  service_thread_ = std::thread(&WebSocketClient::ThreadHandler, this);
+  service_thread_.detach();
   return true;
 }
 
-void Client::Stop(void) {
-  is_running_ = false;
-  while (!is_stop_) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+// 停止服务线程, 关闭并清空已连接的套接字.
+void WebSocketClient::Stop(void) {
+  if (service_is_running_) {
+    service_is_running_.store(false);
+    std::this_thread::sleep_for(std::chrono::seconds(1));
   }
+  if (socket_ > 0) {
+    Close(socket_);
+  }
+  is_connected_.store(false);
 }
 
-int Client::SendRawData(const char *buffer, const int &size) {
-  return send(socket_fd_, buffer, size, 0);
+// 发送原始数据.
+int WebSocketClient::SendRawData(char const* buffer, int const& size) {
+  return Send(socket_, buffer, size, 0);
 }
 
-int Client::SendData(const char *buffer, const int &size) {
+// 将原始数据封装后再进行发送.
+int WebSocketClient::SendData(char const* buffer, int const& size) {
   WebSocket websocket;
   websocket.set_fin(1);
   websocket.set_mask(1);
@@ -219,71 +217,47 @@ int Client::SendData(const char *buffer, const int &size) {
   return SendRawData(msgout);
 }
 
-int Client::RecvData(const int &sock, char *recv_buf) {
-  char buf[1024];
-  int len = 0;
-  int ret = 0;
-  while (ret >= 0) {
-    ret = recv(sock, buf, sizeof(buf), 0);
-    if (ret <= 0) {
-      EpollUnregister(epoll_fd_, sock);
-      close(sock);
-      break;
-    } else if (ret < 1024) {
-      memcpy(recv_buf, buf, ret);
-      len += ret;
-      break;
-    } else {
-      memcpy(recv_buf, buf, sizeof(buf));
-      len += ret;
-    }
-  }
-  return (ret <= 0 ? ret : len);
-}
-
-void Client::ThreadHandler(const int &time_out) {
+// 接收服务端发过来的数据, 调用回调函数进行外部处理.
+void WebSocketClient::ThreadHandler(void) {
+  service_is_running_.store(true);
   int ret;
-  std::unique_ptr<struct epoll_event> epoll_event(new struct epoll_event);
-  std::unique_ptr<char[]> recv_buf(new char[kMaxBufferLength],
+  std::unique_ptr<char[]> buffer(new char[kMaxBufferLength],
                                    std::default_delete<char[]>());
   WebSocket websocket;
   std::vector<char> recv_data, payload_content;
-  while (is_running_) {
-    ret = epoll_wait(epoll_fd_, epoll_event.get(), 1, time_out);
-    if (ret == 0) {
-      printf("Time out\n");
-      continue;
-    } else if (ret == -1) {
-      printf("Error\n");
-    } else {
-      if (epoll_event->events & EPOLLIN) {
-        ret = RecvData(socket_fd_, recv_buf.get());
-        if (ret > 0) {
-          recv_data.clear();
-          payload_content.clear();
-          recv_data.assign(recv_buf.get(), recv_buf.get() + ret);
-          if (websocket.FormDataParse(recv_data, &payload_content) > 0) {
-            callback_(socket_fd_, payload_content.data(),
-                      payload_content.size());
-          }
-        } else if (ret == 0) {
-          printf("Disconnect\n");
-          EpollUnregister(epoll_fd_, socket_fd_);
-          close(socket_fd_);
-          break;
-        }
+  while (service_is_running_) {
+    ret = Recv(socket_, buffer.get(), kMaxBufferLength, 0);
+    if (ret > 0) {
+      deep_callback_(socket_, buffer.get(), ret);
+      recv_data.assign(buffer.get(), buffer.get() + ret);
+      // 解析出实际消息内容.
+      if (websocket.FormDataParse(recv_data, &payload_content) > 0) {
+        callback_(socket_, payload_content.data(),
+                  payload_content.size());
       }
+    } else if (ret <= 0) {
+      if (ret < 0) {  // 排除正常错误返回码.
+#if defined(__linux__)
+        if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK) {
+          continue;
+        }
+#elif defined(_WIN32)
+        auto wsa_errno = WSAGetLastError();
+        if (wsa_errno == WSAEINTR || wsa_errno == WSAEWOULDBLOCK) continue;
+#endif
+      }
+      printf("%s[%d]: Disconnect !!!\n", __FUNCTION__, __LINE__);
+      Close(socket_);
+      break;
     }
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
   }
-  if (socket_fd_ > 0) {
-    close(socket_fd_);
-    socket_fd_ = -1;
+  if (socket_ > 0) {
+    Close(socket_);
+    socket_ = -1;
   }
-  if (epoll_fd_ > 0) {
-    close(epoll_fd_);
-    epoll_fd_ = -1;
-  }
-  is_stop_ = true;
+  service_is_running_.store(false);
+  Stop();
 }
 
 }  // namespace libwebsocket
