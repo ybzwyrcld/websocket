@@ -16,49 +16,57 @@
 
 namespace libwebsocket {
 
+// WebSocket协议头.
+union WebSocketProtocolHead {
+  struct Bits {
+    // 用于表示消息接收类型, 如果接收到未知的opcode, 接收端必须关闭连接.
+    uint16_t opcode:4;
+    // 用于扩展定义的, 如果没有扩展约定的情况则必须为0.
+    uint16_t reserve:3;
+    // 用于描述消息是否结束, 如果为1则该消息为消息尾部, 如果为零则还有后续数据包.
+    uint16_t fin:1;
+    // 实际消息内容长度.
+    // 如果其值在0-125，则是payload的真实长度.
+    // 如果值是126，则后面2个字节形成的16位无符号整型数的值是payload的真实长度.
+    // 如果值是127，则后面8个字节形成的64位无符号整型数的值是payload的真实长度.
+    uint16_t payload_len:7;
+    // 用于标识PayloadData是否经过掩码处理,
+    // 客户端发出的数据帧需要进行掩码处理，所以此位是1, 数据需要解码.
+    uint16_t mask:1;
+  }bit;
+  uint8_t u8val[2];
+  uint16_t u16val;
+};
+
+// Webdocket数据帧中OPCODE定义.
 enum OPCodeType {
-  kOPPacket = 0x0,
-  kOPText,
-  kOPBinary,
-  kOPClose = 0x8,
-  kOPPing,
-  kOPPong,
+  kOPCodePacket = 0x0,  // 附加数据帧
+  kOPCodeText,  // 文本数据帧.
+  kOPCodeBinary,  // 二进制数据帧.
+  kOPCodeClose = 0x8,  // 连接关闭.
+  kOPCodePing,  // ping.
+  kOPCodePong,  // pong.
 };
 
-class WebSocket {
- public:
-  WebSocket() {}
-  ~WebSocket() {}
-  bool IsHandShake(const std::string &request);
-  int HandShake(const std::string &reuest, std::string *respond);
-  int FormDataGenerate(const std::vector<char> &msg, std::vector<char> *out);
-  int FormDataParse(const std::vector<char> &msg, std::vector<char> *out);
-
-  uint8_t fin(void) const { return fin_; }
-  void set_fin(const uint8_t &fin) { fin_ = fin; }
-
-  uint8_t reserve(void) const { return reserve_; }
-  void set_reserve(const uint8_t &reserve) { reserve_ = reserve; }
-
-  uint8_t opcode(void) const { return opcode_; }
-  void set_opcode(const uint8_t &opcode) { opcode_ = opcode; }
-
-  uint8_t mask(void) const { return mask_; }
-  void set_mask(const uint8_t &mask) { mask_ = mask; }
-
-  uint64_t payload_length(void) const { return payload_length_; }
-  void set_payload_length(const uint64_t &payload_length) {
-    payload_length_ = payload_length;
-  }
-
- private:
-  uint8_t fin_ = 0;
-  uint8_t reserve_ = 0;
-  uint8_t opcode_ = 0;
-  uint8_t mask_ = 0;
-  uint64_t payload_length_ = 0;
-  std::vector<char> payload_content_;
+struct WebSocketMsg {
+  // WebSocket协议头.
+  WebSocketProtocolHead msg_head;
+  // WebSocket协议内容.
+  std::vector<char> payload_content;
 };
+
+inline bool IsHandShake(const std::string &request) {
+  return ((request.find("GET / HTTP/1.1") != std::string::npos) &&
+          (request.find("Connection: Upgrade") != std::string::npos ||
+           request.find("Connection:Upgrade") != std::string::npos) &&
+          (request.find("Upgrade: websocket") != std::string::npos ||
+           request.find("Upgrade:websocket") != std::string::npos) &&
+          (request.find("Sec-WebSocket-Key:") != std::string::npos));
+}
+
+int HandShake(std::string const& reuest, std::string* respond);
+int WebSocketFramePackaging(WebSocketMsg const& msg, std::vector<char>* out);
+int WebSocketFrameParse(std::vector<char> const& msg, WebSocketMsg* out);
 
 }  // namespace libwebsocket
 

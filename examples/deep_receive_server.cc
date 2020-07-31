@@ -14,38 +14,37 @@
 
 
 using libwebsocket::WebSocketServer;
-using libwebsocket::WebSocket;
+using libwebsocket::WebSocketMsg;
 
 int main(void) {
   WebSocketServer server;
-  WebSocket websocket;
-  websocket.set_fin(1);
-  websocket.set_opcode(1);
-  websocket.set_mask(0);
+  WebSocketMsg websocket_msg {};
+  websocket_msg.msg_head.bit.fin = 1;
+  websocket_msg.msg_head.bit.opcode = libwebsocket::kOPCodeText;
+  websocket_msg.msg_head.bit.mask = 0;
   std::vector<char> recv_data;
   std::vector<char> payload_content;
   std::vector<char> send_data;
   server.Init();
   server.SetServerAccessPoint("127.0.0.1", 8081);
   // Set the callback function when receiving data.
-  server.OnDeepReceived([&] (WebSocketServer::Socket const& fd,
+  server.OnDeepReceived([&] (WebSocketServer::Socket const& socket,
       char const* buffer, int const& size) -> void {
-    recv_data.clear();
-    payload_content.clear();
-    send_data.clear();
     recv_data.assign(buffer, buffer + size);
     // Handling split packet manually.
-    if (websocket.FormDataParse(recv_data, &payload_content) > 0) {
+    if (libwebsocket::WebSocketFrameParse(recv_data, &websocket_msg) == 0) {
       // TODO(mengyuming@hotmail.com): Just return the received data at now.
-      websocket.set_fin(1);
-      websocket.set_opcode(1);
-      websocket.set_mask(0);
-      websocket.FormDataGenerate(payload_content, &send_data);
-      server.SendToOne(fd, send_data.data(), send_data.size());
+      websocket_msg.msg_head.bit.fin = 1;
+      websocket_msg.msg_head.bit.opcode = libwebsocket::kOPCodeText;
+      websocket_msg.msg_head.bit.mask = 0;
+      if (libwebsocket::WebSocketFramePackaging(websocket_msg, &send_data) == 0) {
+        server.SendToOne(socket, send_data.data(), send_data.size());
+      }
     }
   });
   if ((server.InitServer() == 0) &&
       server.Run()) {
+    std::this_thread::sleep_for(std::chrono::seconds(1));
     while (server.service_is_running()) {
       std::this_thread::sleep_for(std::chrono::seconds(5));
     }

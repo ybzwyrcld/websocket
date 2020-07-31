@@ -31,22 +31,21 @@ namespace libwebsocket {
 //
 // Example:
 //    WebSocketServer server;
-//    WebSocket websocket;;
-//    websocket.set_fin(1);
-//    websocket.set_opcode(1);
-//    websocket.set_mask(0);
-//    std::vector<char> payload_content;
+//    WebSocketMsg websocket_msg {};
+//    websocket_msg.msg_head.bit.fin = 1;
+//    websocket_msg.msg_head.bit.opcode = libwebsocket::kOPCodeText;
+//    websocket_msg.msg_head.bit.mask = 0;
 //    std::vector<char> send_data;
 //    server.Init();
 //    server.SetServerAccessPoint("127.0.0.1", 8081);
 //    // 设置接收到解析后数据的回调函数, 这里只是将接收到的数据返回.
-//    server.OnReceived([&] (const WebSocketServer::Socket& fd,
+//    server.OnReceived([&] (const WebSocketServer::Socket& socket,
 //        const char *buffer, const int &size) {
-//      payload_content.clear();
-//      send_data.clear();
-//      payload_content.assign(buffer, buffer + size);
-//      websocket.FormDataGenerate(payload_content, &send_data);
-//      send(fd, send_data.data(), send_data.size(), 0);
+//      websocket_msg.payload_content.assign(buffer, buffer + size);
+//      if (libwebsocket::WebSocketFramePackaging(
+//              websocket_msg, &send_data) == 0) {
+//        server.SendToOne(socket, send_data.data(), send_data.size());
+//      }
 //    });
 //    if ((server.InitServer() == 0) &&
 //        server.Run()) {

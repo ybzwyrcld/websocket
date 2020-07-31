@@ -207,14 +207,16 @@ int WebSocketClient::SendRawData(char const* buffer, int const& size) {
 
 // 将原始数据封装后再进行发送.
 int WebSocketClient::SendData(char const* buffer, int const& size) {
-  WebSocket websocket;
-  websocket.set_fin(1);
-  websocket.set_mask(1);
-  websocket.set_opcode(0x1);
-  std::vector<char> msgin, msgout;
-  msgin.assign(buffer, buffer + size);
-  websocket.FormDataGenerate(msgin, &msgout);
-  return SendRawData(msgout);
+  WebSocketMsg websocket_msg{};
+  websocket_msg.msg_head.bit.fin = 1;
+  websocket_msg.msg_head.bit.mask = 1;
+  websocket_msg.msg_head.bit.opcode = kOPCodeText;
+  std::vector<char> msgout;
+  websocket_msg.payload_content.assign(buffer, buffer + size);
+  if (WebSocketFramePackaging(websocket_msg, &msgout) == 0) {
+    return SendRawData(msgout);
+  }
+  return -1;
 }
 
 // 接收服务端发过来的数据, 调用回调函数进行外部处理.
@@ -223,7 +225,7 @@ void WebSocketClient::ThreadHandler(void) {
   int ret;
   std::unique_ptr<char[]> buffer(new char[kMaxBufferLength],
                                    std::default_delete<char[]>());
-  WebSocket websocket;
+  WebSocketMsg websocket;
   std::vector<char> recv_data, payload_content;
   while (service_is_running_) {
     ret = Recv(socket_, buffer.get(), kMaxBufferLength, 0);
@@ -231,9 +233,9 @@ void WebSocketClient::ThreadHandler(void) {
       deep_callback_(socket_, buffer.get(), ret);
       recv_data.assign(buffer.get(), buffer.get() + ret);
       // 解析出实际消息内容.
-      if (websocket.FormDataParse(recv_data, &payload_content) > 0) {
-        callback_(socket_, payload_content.data(),
-                  payload_content.size());
+      if (WebSocketFrameParse(recv_data, &websocket) == 0) {
+        callback_(socket_, websocket.payload_content.data(),
+                  websocket.payload_content.size());
       }
     } else if (ret <= 0) {
       if (ret < 0) {  // 排除正常错误返回码.

@@ -15,27 +15,26 @@
 
 
 using libwebsocket::WebSocketServer;
-using libwebsocket::WebSocket;
+using libwebsocket::WebSocketMsg;
 
 int main(void) {
   WebSocketServer server;
-  WebSocket websocket;;
-  websocket.set_fin(1);
-  websocket.set_opcode(1);
-  websocket.set_mask(0);
-  std::vector<char> payload_content;
+  WebSocketMsg websocket_msg {};
+  websocket_msg.msg_head.bit.fin = 1;
+  websocket_msg.msg_head.bit.opcode = libwebsocket::kOPCodeText;
+  websocket_msg.msg_head.bit.mask = 0;
+
   std::vector<char> send_data;
   server.Init();
   server.SetServerAccessPoint("127.0.0.1", 8081);
   // Set the callback function when receiving data.
-  server.OnReceived([&] (const WebSocketServer::Socket& fd,
+  server.OnReceived([&] (const WebSocketServer::Socket& socket,
       char const* buffer, int const& size) -> void {
-    payload_content.clear();
-    send_data.clear();
-    payload_content.assign(buffer, buffer + size);
+    websocket_msg.payload_content.assign(buffer, buffer + size);
     // TODO(mengyuming@hotmail.com): Just return the received data at now.
-    websocket.FormDataGenerate(payload_content, &send_data);
-    send(fd, send_data.data(), send_data.size(), 0);
+    if (libwebsocket::WebSocketFramePackaging(websocket_msg, &send_data) == 0) {
+      server.SendToOne(socket, send_data.data(), send_data.size());
+    }
   });
   if ((server.InitServer() == 0) &&
       server.Run()) {

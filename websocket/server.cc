@@ -24,9 +24,8 @@
 #include <thread>  // NOLINT.
 #include <vector>
 
-#include "websocket.h"
 #include "socket_util.h"
-
+#include "websocket.h"
 
 namespace libwebsocket {
 
@@ -151,7 +150,6 @@ void WebSocketServer::WaitHandler(void) {
   auto tp = std::chrono::steady_clock::now();
   std::unique_ptr<char[]> buffer(
       new char[kMaxBufferLength], std::default_delete<char[]>());
-  WebSocket websocket;
   while(waiting_is_running_) {
     // 等待新的连接.
     Socket socket = Accept(listen_socket_,
@@ -192,12 +190,15 @@ void WebSocketServer::WaitHandler(void) {
       continue;
     }
     request.assign(msg.begin(), msg.end());
-    if (!websocket.IsHandShake(request)) {
+    if (!IsHandShake(request)) {
       Close(socket);
       continue;
     }
-    websocket.HandShake(request, &respond);
-    Send(socket, respond.c_str(), respond.size(), 0);
+    HandShake(request, &respond);
+    if (Send(socket, respond.c_str(), respond.size(), 0) < 0) {
+      Close(socket);
+      continue;
+    }
     // 设置非阻塞模式.
 #if defined(__linux__)
     int flags = fcntl(socket, F_GETFL, 0);
@@ -222,20 +223,19 @@ void WebSocketServer::ServiceHandler(void) {
   service_is_running_.store(true);
   int ret = -1;
   bool alive = false;
-  WebSocket websocket;
   std::unique_ptr<char[]> buffer(
     new char[kMaxBufferLength], std::default_delete<char[]>());
   std::vector<char> msg;
-  std::vector<char> payload_content;
+  WebSocketMsg websocket_msg {};
   while(service_is_running_) {
     for (auto it = valid_sockets_.begin(); it != valid_sockets_.end(); ++it) {
       if ((ret = Recv(*it, buffer.get(), kMaxBufferLength, 0)) > 0) {
         if (!alive) alive = true;
         deep_callback_(*it, buffer.get(), ret);
-        payload_content.clear();
         msg.assign(buffer.get(), buffer.get() + ret);
-        if (websocket.FormDataParse(msg, &payload_content) > 0) {
-          callback_(*it, payload_content.data(), payload_content.size());
+        if (WebSocketFrameParse(msg, &websocket_msg) == 0) {
+          callback_(*it, websocket_msg.payload_content.data(),
+                    websocket_msg.payload_content.size());
         }
         continue;
       } else if (ret <= 0) {
