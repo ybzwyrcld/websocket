@@ -118,7 +118,7 @@ int WebSocketFramePackaging(const WebSocketMsg& msg,
   if (length < 126) {
     head.bit.payload_len = length;
     out->push_back(head.u8val[1]);
-  } else if (length == 126) {
+  } else if (length < 65536) {
     head.bit.payload_len = 126;
     out->push_back(head.u8val[1]);
     U16Converter converter;
